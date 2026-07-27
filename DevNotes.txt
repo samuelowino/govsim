@@ -1,0 +1,77 @@
+Domain Organization
+
+- Core Metrics
+    - GDP
+    - Debt
+    - Population
+    - WealthGap
+    - PovertyLine (dollar/day)
+    - Social Benefits (% of population)
+    - Literary Rate (% of population)
+    - Life Expectancy
+    - Infant Mortality
+    - Relation Competing Powers
+    
+- Derive "absolute health metric" from core metrics
+- Absolute metric must not go below 0.3 (Range 1...0)
+- Core metrics are updated based on related "secondary metrics"
+
+- "secondary metrics" are constantly updated based on policy decisions
+- a "policy decision" can either add 0.01 or deduct 0.01 from a secondary metric
+- the secondary metric will deduct or add a weighted equivalent to its related core metric
+    - the actual influence of a secondary metric on a core metric is determined by the
+        change amount (+/- 0.01) divided by the count of other secondary metrics that have influence on the core metric
+- if a secondary metric reaches a total count of less than 0, it will have a rolling effect of a fixed --0.01 (not weighted) on the core metric
+
+- Secondary Metrics
+    - GDP
+        - Unemployment Rate
+        - Employable Population (% of total population)
+        - Infrastructure Score (1...0)
+        - Stability score : weighted based on (peace score, rule of law application score , corruption score)
+        - Crisis Score : weighted based on crisis factors such as war, pandemic, corruption, unemployment rate, internal division
+        
+    
+)))))))))))))))))))))))))))))))))))
+SIM MODEL                         (
+(((((((((((((((((((((((((((((((((((
+        
+------------------------------
+Metric : Properties
+------------------------------
+- name
+- identifier UUID
+- score (1...0)
+- relation_identifiers: [ UUID]
+- absolute value (number)
+- absolute description (text)
+- level (primary/secondary metric) *enumeration
+
+---------------------------------------
+Sim Event
+---------------------------------------
+- identifier UUID
+- name
+- affected_metric_identifiers: [UUID]
+- trigger_metric_identifiers: [UUID]
+- crisis_score (1...0)
+- policy_identifiers: [UUID]
+- event_time_stamp
+
+--------------------------------------
+Sim Policy
+--------------------------------------
+- identifier UUID
+- name
+- description
+- affected_metric_identifiers: (dictionary) [metric_identifier: score_change (+/- 0.01)]
+
+(((((((((((( ISSUE 1: CHECKLIST )))))))))))))
+🔴 Implement a persistence strategy : SQLite|JSON
+🔴 Build out persistence layer for listed models
+🔴 Build new policies (in-tray) service layer
+🔴 Build policy application service layer
+🔴 Implement Game Loop with Policy Prompts
+🔴 Implement persistent core metrics changes based on current policies and metrics
+🔴 Build a metrics summary dashboard
+🔴 Implement decay logic based on policy descisions and metric stats
