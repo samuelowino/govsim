@@ -52,6 +52,7 @@ Sim Event
 ---------------------------------------
 - identifier UUID
 - name
+- event_source: enumeration
 - affected_metric_identifiers: [UUID]
 - trigger_metric_identifiers: [UUID]
 - crisis_score (1...0)
@@ -67,7 +68,8 @@ Sim Policy
 - affected_metric_identifiers: (dictionary) [metric_identifier: score_change (+/- 0.01)]
 
 (((((((((((( ISSUE 1: CHECKLIST )))))))))))))
-🔴 Implement a persistence strategy : SQLite|JSON
+✅ Implement a persistence strategy : SQLite|JSON
+🔴 Model the simulation's data layer
 🔴 Build out persistence layer for listed models
 🔴 Build new policies (in-tray) service layer
 🔴 Build policy application service layer
