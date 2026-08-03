@@ -72,3 +72,13 @@
 - Regional alliances/blocs
 
 ---
+
+## Code Coverage
+
+<!-- COVERAGE_START -->
+![Code Coverage](https://img.shields.io/badge/Coverage-56.00%25-red.svg)
+
+**Overall Coverage: 56.00%**
+
+*Last updated: Mon Aug  3 23:39:42 UTC 2026*
+<!-- COVERAGE_END -->
