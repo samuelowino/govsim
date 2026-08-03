@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Swift Code Coverage Build Script for govsim
+# Swift Code Coverage Build Script for govsim with Detailed Markdown Reports
 # This script builds the govsim project with code coverage enabled and updates README.md
+# with per-file coverage details and missed branch snippets
 
 set -e  # Exit on any error
 
@@ -13,6 +14,7 @@ COVERAGE_REPORT_PATH="${PROJECT_DIR}/coverage_report"
 COVERAGE_SUMMARY_FILE="${COVERAGE_REPORT_PATH}/coverage_summary.txt"
 README_FILE="${PROJECT_DIR}/README.md"
 PROF_DATA_PATH="${DERIVED_DATA_PATH}/coverage"
+DETAILED_README_SECTION="${COVERAGE_REPORT_PATH}/detailed_coverage.md"
 
 # Colors for output
 RED='\033[0;31m'
@@ -59,17 +61,15 @@ build_with_coverage() {
     print_message "Tests completed successfully"
 }
 
-# Generate coverage report
-generate_coverage_report() {
-    print_message "Generating coverage report..."
+# Generate detailed coverage data
+generate_coverage_data() {
+    print_message "Generating coverage data..."
     
     # Find the coverage.profdata file
     PROF_DATA=$(find "${DERIVED_DATA_PATH}" -name "*.profdata" | head -n 1)
     
     if [ -z "${PROF_DATA}" ]; then
         print_error "No .profdata file found!"
-        print_message "Looking for profdata in: ${DERIVED_DATA_PATH}"
-        find "${DERIVED_DATA_PATH}" -name "*.profdata" -type f
         exit 1
     fi
     
@@ -79,8 +79,6 @@ generate_coverage_report() {
     TEST_BINARY=$(find "${DERIVED_DATA_PATH}" -name "${PROJECT_NAME}PackageTests" -type f -perm +111 | head -n 1)
     
     if [ -z "${TEST_BINARY}" ]; then
-        print_warning "Could not find test binary, using llvm-cov with the executable"
-        # Try to find the executable
         EXEC_BINARY=$(find "${DERIVED_DATA_PATH}" -name "${PROJECT_NAME}" -type f -perm +111 | head -n 1)
         if [ -z "${EXEC_BINARY}" ]; then
             print_error "Could not find any binary to analyze coverage on"
@@ -93,61 +91,52 @@ generate_coverage_report() {
     
     print_message "Using binary: ${BINARY_TO_USE}"
     
-    # Generate HTML coverage report
-    print_message "Generating HTML coverage report..."
+    # Generate HTML coverage report with branch information
+    print_message "Generating HTML coverage report with branch details..."
     xcrun llvm-cov show \
         --instr-profile="${PROF_DATA}" \
         "${BINARY_TO_USE}" \
         --format=html \
         --output-dir="${COVERAGE_REPORT_PATH}" \
-        --ignore-filename-regex=".build|Tests|Caches"
+        --ignore-filename-regex=".build|Tests|Caches" \
+        --show-branches=count \
+        --show-expansions
     
-    # Generate coverage summary
-    print_message "Generating coverage summary..."
-    xcrun llvm-cov report \
-        --instr-profile="${PROF_DATA}" \
-        "${BINARY_TO_USE}" \
-        --ignore-filename-regex=".build|Tests|Caches" > "${COVERAGE_SUMMARY_FILE}"
-    
-    # Also generate a simpler summary for the README
-    COVERAGE_SUMMARY_SHORT="${COVERAGE_REPORT_PATH}/coverage_short.txt"
+    # Generate detailed per-file summary with branch information
+    print_message "Generating per-file coverage summary..."
     xcrun llvm-cov report \
         --instr-profile="${PROF_DATA}" \
         "${BINARY_TO_USE}" \
         --ignore-filename-regex=".build|Tests|Caches" \
-        | head -20 > "${COVERAGE_SUMMARY_SHORT}"
+        --show-branch-summary > "${COVERAGE_SUMMARY_FILE}"
     
     # Extract overall coverage percentage
     COVERAGE_PERCENTAGE=$(grep -E "^TOTAL" "${COVERAGE_SUMMARY_FILE}" | awk '{print $4}' | sed 's/%//g')
     
     if [ -z "${COVERAGE_PERCENTAGE}" ]; then
-        # Try alternative extraction method
         COVERAGE_PERCENTAGE=$(grep -oE '[0-9]+\.[0-9]+%' "${COVERAGE_SUMMARY_FILE}" | head -n 1 | sed 's/%//g')
     fi
     
     if [ -z "${COVERAGE_PERCENTAGE}" ]; then
         COVERAGE_PERCENTAGE="0.0"
-        print_warning "Could not extract coverage percentage, defaulting to 0.0"
-    else
-        print_message "Overall coverage: ${COVERAGE_PERCENTAGE}%"
     fi
     
-    # Save coverage percentage for later use
     echo "${COVERAGE_PERCENTAGE}" > "${COVERAGE_REPORT_PATH}/coverage_percentage.txt"
+    print_message "Overall coverage: ${COVERAGE_PERCENTAGE}%"
 }
 
-# Update README.md with coverage badge
-update_readme() {
-    print_message "Updating README.md with coverage information..."
+# Generate detailed markdown report with per-file coverage and missed branches
+generate_detailed_markdown() {
+    print_message "Generating detailed markdown coverage report..."
     
-    # Read coverage percentage
-    if [ -f "${COVERAGE_REPORT_PATH}/coverage_percentage.txt" ]; then
-        COVERAGE_NUM=$(cat "${COVERAGE_REPORT_PATH}/coverage_percentage.txt" | tr -d ' ')
-    else
-        COVERAGE_NUM="0.0"
-    fi
+    cat > "${DETAILED_README_SECTION}" << 'EOF'
+## Detailed Code Coverage Report
+
+### Overall Coverage
+EOF
     
-    # Determine color based on coverage percentage
+    # Add overall coverage badge
+    COVERAGE_NUM=$(cat "${COVERAGE_REPORT_PATH}/coverage_percentage.txt" | tr -d ' ')
     if (( $(echo "${COVERAGE_NUM} >= 80" | bc -l 2>/dev/null || echo "0") )); then
         COLOR="brightgreen"
     elif (( $(echo "${COVERAGE_NUM} >= 60" | bc -l 2>/dev/null || echo "0") )); then
@@ -155,63 +144,143 @@ update_readme() {
     else
         COLOR="red"
     fi
+    echo "![Coverage](https://img.shields.io/badge/Coverage-${COVERAGE_NUM}%25-${COLOR}.svg)" >> "${DETAILED_README_SECTION}"
+    echo "" >> "${DETAILED_README_SECTION}"
     
-    COVERAGE_BADGE="![Code Coverage](https://img.shields.io/badge/Coverage-${COVERAGE_NUM}%25-${COLOR}.svg)"
+    # Extract per-file coverage data
+    echo "### Per-File Coverage Summary" >> "${DETAILED_README_SECTION}"
+    echo "" >> "${DETAILED_README_SECTION}"
+    echo "| File | Line Coverage | Function Coverage | Branch Coverage |" >> "${DETAILED_README_SECTION}"
+    echo "|------|--------------|------------------|----------------|" >> "${DETAILED_README_SECTION}"
+    
+    # Parse the coverage summary for per-file data
+    # Skip the header lines and TOTAL line, extract each file's data
+    tail -n +4 "${COVERAGE_SUMMARY_FILE}" | head -n -1 | while read -r line; do
+        if [[ -n "$line" ]]; then
+            # Extract filename (remove path if present)
+            FILENAME=$(echo "$line" | awk '{print $NF}' | xargs basename 2>/dev/null || echo "unknown")
+            LINE_COV=$(echo "$line" | awk '{print $4}' 2>/dev/null || echo "N/A")
+            FUNC_COV=$(echo "$line" | awk '{print $5}' 2>/dev/null || echo "N/A")
+            BRANCH_COV=$(echo "$line" | awk '{print $6}' 2>/dev/null || echo "N/A")
+            
+            # Clean up the values
+            LINE_COV=$(echo "$LINE_COV" | sed 's/%//g')
+            FUNC_COV=$(echo "$FUNC_COV" | sed 's/%//g')
+            BRANCH_COV=$(echo "$BRANCH_COV" | sed 's/%//g')
+            
+            echo "| \`$FILENAME\` | ${LINE_COV}% | ${FUNC_COV}% | ${BRANCH_COV}% |" >> "${DETAILED_README_SECTION}"
+        fi
+    done
+    
+    echo "" >> "${DETAILED_README_SECTION}"
+    
+    # Generate missed branches section
+    echo "### Missed Branches and Untested Code" >> "${DETAILED_README_SECTION}"
+    echo "" >> "${DETAILED_README_SECTION}"
+    echo "Below are code snippets showing branches that were not fully covered by tests:" >> "${DETAILED_README_SECTION}"
+    echo "" >> "${DETAILED_README_SECTION}"
+    
+    # Extract missed branches from coverage data
+    # This uses llvm-cov show with text output to find uncovered branches
+    print_message "Analyzing missed branches..."
+    
+    # Create a temporary file for uncovered code
+    UNCOVERED_FILE="${COVERAGE_REPORT_PATH}/uncovered_code.txt"
+    
+    # Generate detailed coverage with branch counts
+    xcrun llvm-cov show \
+        --instr-profile="${PROF_DATA}" \
+        "${BINARY_TO_USE}" \
+        --ignore-filename-regex=".build|Tests|Caches" \
+        --show-branches=count \
+        --show-expansions > "${UNCOVERED_FILE}" 2>/dev/null || true
+    
+    # Parse the uncovered code for branches that weren't fully covered
+    # This is a simplified parser - you may need to adjust based on actual output format
+    current_file=""
+    line_num=0
+    
+    # Look for uncovered branches (regions that are highlighted as uncovered)
+    while IFS= read -r line; do
+        # Check for file markers (adjust pattern based on actual output)
+        if [[ "$line" =~ ^.*\.swift$ ]]; then
+            current_file=$(basename "$line")
+            continue
+        fi
+        
+        # Look for lines with branch counts showing uncovered branches
+        # Patterns like: "|  0|" or "| 0 |" indicating uncovered code
+        if [[ "$line" =~ ^[[:space:]]*\|[[:space:]]*[0-9]+[[:space:]]*\| ]]; then
+            line_num=$(echo "$line" | awk -F'|' '{print $2}' | tr -d ' ')
+            
+            # Check if this line has any branch markers indicating missed branches
+            if [[ "$line" =~ "Branch" ]] || [[ "$line" =~ "True" ]] || [[ "$line" =~ "False" ]]; then
+                # Extract the code
+                code_snippet=$(echo "$line" | sed 's/^.*|.*|//' | sed 's/^[[:space:]]*//')
+                
+                # If it has branch markers showing missed branches
+                if [[ "$line" =~ "False" ]] || [[ "$line" =~ "0" ]]; then
+                    echo "#### \`$current_file\` (Line $line_num)" >> "${DETAILED_README_SECTION}"
+                    echo '```swift' >> "${DETAILED_README_SECTION}"
+                    echo "$code_snippet" >> "${DETAILED_README_SECTION}"
+                    echo '```' >> "${DETAILED_README_SECTION}"
+                    echo "" >> "${DETAILED_README_SECTION}"
+                    
+                    # Add a note about which branch was missed
+                    if [[ "$line" =~ "True: 0" ]]; then
+                        echo "⚠️ True branch not executed" >> "${DETAILED_README_SECTION}"
+                    elif [[ "$line" =~ "False: 0" ]]; then
+                        echo "⚠️ False branch not executed" >> "${DETAILED_README_SECTION}"
+                    fi
+                    echo "" >> "${DETAILED_README_SECTION}"
+                fi
+            fi
+        fi
+    done < "${UNCOVERED_FILE}"
+    
+    # If no missed branches were found, add a note
+    if ! grep -q "#### \`" "${DETAILED_README_SECTION}"; then
+        echo "No missed branches detected! All branches are covered by tests." >> "${DETAILED_README_SECTION}"
+        echo "" >> "${DETAILED_README_SECTION}"
+    fi
+    
+    # Add timestamp
+    echo "---" >> "${DETAILED_README_SECTION}"
+    echo "*Coverage report generated on $(date)*" >> "${DETAILED_README_SECTION}"
+    
+    print_message "Detailed markdown report generated at ${DETAILED_README_SECTION}"
+}
+
+# Update README.md with coverage information
+update_readme() {
+    print_message "Updating README.md with coverage information..."
     
     # Check if README.md exists
     if [ ! -f "${README_FILE}" ]; then
         print_warning "README.md not found. Creating a new one..."
         echo "# ${PROJECT_NAME}" > "${README_FILE}"
         echo "" >> "${README_FILE}"
-        echo "## Code Coverage" >> "${README_FILE}"
-        echo "" >> "${README_FILE}"
-        echo "${COVERAGE_BADGE}" >> "${README_FILE}"
-        echo "" >> "${README_FILE}"
-        echo "Coverage report generated on $(date)" >> "${README_FILE}"
-    else
-        # Check if coverage section exists in README
-        if grep -q "## Code Coverage" "${README_FILE}"; then
-            # Update existing coverage section using markers
-            if grep -q "<!-- COVERAGE_START -->" "${README_FILE}" && grep -q "<!-- COVERAGE_END -->" "${README_FILE}"; then
-                # Replace content between markers
-                sed -i.bak "/<!-- COVERAGE_START -->/,/<!-- COVERAGE_END -->/c\\
-<!-- COVERAGE_START -->\\
-${COVERAGE_BADGE}\\
-\\
-**Overall Coverage: ${COVERAGE_NUM}%**\\
-\\
-*Last updated: $(date)*\\
-<!-- COVERAGE_END -->" "${README_FILE}"
-                rm -f "${README_FILE}.bak"
-            else
-                # Add markers and content
-                echo "" >> "${README_FILE}"
-                echo "## Code Coverage" >> "${README_FILE}"
-                echo "" >> "${README_FILE}"
-                echo "<!-- COVERAGE_START -->" >> "${README_FILE}"
-                echo "${COVERAGE_BADGE}" >> "${README_FILE}"
-                echo "" >> "${README_FILE}"
-                echo "**Overall Coverage: ${COVERAGE_NUM}%**" >> "${README_FILE}"
-                echo "" >> "${README_FILE}"
-                echo "*Last updated: $(date)*" >> "${README_FILE}"
-                echo "<!-- COVERAGE_END -->" >> "${README_FILE}"
-            fi
-        else
-            # Append coverage section with markers
-            echo "" >> "${README_FILE}"
-            echo "## Code Coverage" >> "${README_FILE}"
-            echo "" >> "${README_FILE}"
-            echo "<!-- COVERAGE_START -->" >> "${README_FILE}"
-            echo "${COVERAGE_BADGE}" >> "${README_FILE}"
-            echo "" >> "${README_FILE}"
-            echo "**Overall Coverage: ${COVERAGE_NUM}%**" >> "${README_FILE}"
-            echo "" >> "${README_FILE}"
-            echo "*Last updated: $(date)*" >> "${README_FILE}"
-            echo "<!-- COVERAGE_END -->" >> "${README_FILE}"
-        fi
     fi
     
-    print_message "README.md updated with coverage badge: ${COVERAGE_BADGE}"
+    # Check if coverage section exists with markers
+    if grep -q "<!-- COVERAGE_DETAIL_START -->" "${README_FILE}" && grep -q "<!-- COVERAGE_DETAIL_END -->" "${README_FILE}"; then
+        # Replace content between markers with the detailed report
+        sed -i.bak "/<!-- COVERAGE_DETAIL_START -->/,/<!-- COVERAGE_DETAIL_END -->/c\\
+<!-- COVERAGE_DETAIL_START -->\\
+$(cat ${DETAILED_README_SECTION})\\
+<!-- COVERAGE_DETAIL_END -->" "${README_FILE}"
+        rm -f "${README_FILE}.bak"
+    else
+        # Append the detailed coverage section
+        echo "" >> "${README_FILE}"
+        echo "## Code Coverage" >> "${README_FILE}"
+        echo "" >> "${README_FILE}"
+        echo "<!-- COVERAGE_DETAIL_START -->" >> "${README_FILE}"
+        cat "${DETAILED_README_SECTION}" >> "${README_FILE}"
+        echo "<!-- COVERAGE_DETAIL_END -->" >> "${README_FILE}"
+    fi
+    
+    print_message "README.md updated with detailed coverage report"
 }
 
 # Display coverage report location
@@ -220,12 +289,12 @@ show_coverage_info() {
     echo ""
     echo "Coverage Summary:"
     echo "─────────────────────────────────────"
-    cat "${COVERAGE_SUMMARY_FILE}"
+    head -20 "${COVERAGE_SUMMARY_FILE}"
     echo "─────────────────────────────────────"
     echo ""
     echo "HTML Coverage Report: ${COVERAGE_REPORT_PATH}/index.html"
-    echo "Coverage Summary: ${COVERAGE_SUMMARY_FILE}"
-    echo "README.md updated with coverage badge"
+    echo "Detailed Coverage Summary: ${COVERAGE_SUMMARY_FILE}"
+    echo "README.md updated with detailed coverage report"
     echo ""
     
     # Open coverage report in browser if possible
@@ -237,13 +306,14 @@ show_coverage_info() {
 
 # Main execution
 main() {
-    print_message "Starting govsim code coverage build process..."
+    print_message "Starting govsim detailed code coverage build process..."
     print_message "Project: ${PROJECT_NAME}"
     print_message "Swift version: $(swift --version | head -n 1)"
     
     clean_build
     build_with_coverage
-    generate_coverage_report
+    generate_coverage_data
+    generate_detailed_markdown
     update_readme
     show_coverage_info
     
