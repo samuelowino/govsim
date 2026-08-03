@@ -4,9 +4,9 @@ name: Update Code Coverage Report
 # The `paths-ignore` helps prevent an infinite loop of actions [citation:3].
 on:
   push:
-    branches: [ main ]
-    paths-ignore:
-      - 'README.md'
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
 
 permissions:
   contents: write
