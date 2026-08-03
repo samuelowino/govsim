@@ -1,0 +1,36 @@
+name: Update Code Coverage Report
+
+# This triggers the action on pushes to the main branch, but you can adjust it.
+# The `paths-ignore` helps prevent an infinite loop of actions [citation:3].
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+
+permissions:
+  contents: write
+
+jobs:
+  coverage:
+    runs-on: macos-latest  # Required for building iOS/macOS projects
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # This ensures the action pushes to the same branch that triggered it.
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Run coverage build script
+        run: |
+          chmod +x build_with_coverage.sh
+          ./build_with_coverage.sh
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          # Only commit if there are changes to the README
+          git diff --cached --quiet || (git commit -m "chore: auto-update code coverage badge" && git push)
